@@ -1049,20 +1049,41 @@ const formatFichaPlain = (f: FichaEmpresa): string => {
 const buildFichaContext = (jid: string): string => {
     const f = loadFicha(jid);
     const pairs: Array<[string, string | undefined]> = [
+        // Informações da empresa
         ['Razão Social', f.razaoSocial],
         ['CNPJ', f.cnpj],
         ['IE', f.inscricaoEstadual],
         ['Situação', f.situacaoCadastral],
+        ['CNAE', f.cnae],
+        
+        // Informações pessoais
         ['Representante', f.representanteLegal],
         ['CPF', f.cpf],
+        ['RG', f.rg],
+        ['Órgão Expedidor', f.orgaoExpedidor],
+        ['Data Expedição', f.dataExpedicao],
+        ['Data Nascimento', f.dataNascimento],
+        ['Nome da Mãe', f.nomeMae],
+        
+        // Contato
         ['E-mail', f.email],
         ['Tel1', f.telefone1],
         ['Tel2', f.telefone2],
+        ['Tel3', f.telefone3],
+        ['Tel4', f.telefone4],
+        
+        // Endereço
         ['Endereço', f.endereco],
+        ['Número', f.numero],
+        ['Complemento', f.complemento],
         ['CEP', f.cep],
         ['Bairro', f.bairro],
         ['Cidade', f.cidade],
         ['UF', f.estado],
+        ['Endereço Entrega', f.enderecoEntrega],
+        ['Referência', f.referencia],
+        
+        // Plano e valores
         ['Vencimento', f.vencimento || f.dataVencimento],
         ['Portabilidade', f.portabilidade],
         ['Operadora', f.operadora],
