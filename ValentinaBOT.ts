@@ -522,13 +522,31 @@ async function handle(msg: WAMessage): Promise<void> {
         try {
             const lower = (finalText || '').toLowerCase();
             if(/enviei|mandei|acabei de enviar|enviado/.test(lower)) {
+                // Analisa o histórico para extrair informações perdidas
+                analyzeConversationHistory(jid);
+                
                 const ficha = loadFicha(jid);
                 const missing = buildMissingChecklistText(jid);
                 
-                if (missing) {
+                // Se não há pendências críticas, confirmar que está tudo ok
+                if (!missing) {
+                    await sendMessage(jid, 'Perfeito! Com todos os dados coletados, vou processar sua solicitação. O setor administrativo entrará em contato para finalizar a formalização.');
+                    return;
+                }
+                
+                // Se há pendências, mas são apenas documentos, orientar sobre envio
+                const missingArray = missing.split('\n').filter(line => line.trim());
+                const onlyDocuments = missingArray.every(item => 
+                    item.includes('documento') || 
+                    item.includes('contrato') || 
+                    item.includes('foto') ||
+                    item.includes('representante')
+                );
+                
+                if (onlyDocuments) {
                     await sendMessage(jid, `Entendi que você enviou os documentos. Para finalizarmos, ainda preciso de:\n${missing}\n\nPode me enviar por aqui?`);
                 } else {
-                    await sendMessage(jid, 'Perfeito! Com todos os dados coletados, vou processar sua solicitação. O setor administrativo entrará em contato para finalizar a formalização.');
+                    await sendMessage(jid, `Entendi que você enviou os documentos. Para finalizarmos, ainda preciso de:\n${missing}\n\nPode me enviar por aqui?`);
                 }
                 return;
             }
@@ -538,6 +556,9 @@ async function handle(msg: WAMessage): Promise<void> {
         try {
             const lower = (finalText || '').toLowerCase();
             if(/\bo que falta\b|\bfalta algo\b|\bfaltando\b|\bpendenc/i.test(lower)) {
+                // Analisa o histórico para extrair informações perdidas
+                analyzeConversationHistory(jid);
+                
                 const missing = buildMissingChecklistText(jid);
                 const resp = missing
                     ? `Para concluirmos, ainda falta(m):\n${missing}\n\nSe preferir, pode enviar por e-mail: valentimdigitalnegocios@gmail.com e me avisar por aqui.`
@@ -1123,11 +1144,16 @@ const updateFichaFromText = async (jid: string, text: string): Promise<void> => 
     const cpfDigits = cpfCap ? cpfCap.replace(/\D+/g,'') : undefined;
     if(cpfDigits && validateCpf(cpfDigits)) setIf('cpf', cpfDigits);
     setIf('telefone1', m(/(?:tel|telefone|contato)\s*[:\-]?\s*(\+?\d{10,15})/i));
-    // datas (dd/mm ou dd/mm/aaaa)
-    setIf('dataVencimento', m(/venc(?:imento)?\s*[:\-]?\s*(\d{1,2}\/(?:\d{1,2}(?:\/\d{2,4})?)?)/i));
-    setIf('vencimento', m(/\b(vencimento)\b.*?(\d{1,2})/i) || m(/\b(\d{1,2})\b.*vencimento/i));
-    // Portabilidade
-    if(/\bportabilidade\b/i.test(text)) {
+    
+    // MELHORADO: Detecção de data de vencimento mais robusta
+    const vencimentoMatch = m(/venc(?:imento)?\s*[:\-]?\s*(\d{1,2})/i) || m(/\b(\d{1,2})\b.*vencimento/i) || m(/data\s*de\s*vencimento\s*[:\-]?\s*(\d{1,2})/i);
+    if(vencimentoMatch) {
+        setIf('vencimento', vencimentoMatch);
+        setIf('dataVencimento', vencimentoMatch);
+    }
+    
+    // MELHORADO: Detecção de portabilidade mais robusta
+    if(/\bportabilidade\b/i.test(text) || /\bportar\b/i.test(text) || /\btrazer\s*número\b/i.test(text)) {
         setIf('portabilidade', /(\bn[aã]o\b)/i.test(text) ? 'Não' : 'Sim');
         setIf('operadora', m(/operadora\s*[:\-]?\s*([A-Za-zÀ-ÿ\s]+)/i));
         setIf('numeroPortado', m(/(\+?\d{10,15})/));
@@ -1138,6 +1164,13 @@ const updateFichaFromText = async (jid: string, text: string): Promise<void> => 
             setIfBool('migracaoTimParaTim', true); // flag especial para migração
         }
     }
+    
+    // MELHORADO: Detecção de número de linhas mais robusta
+    const linhasMatch = m(/(\d+)\s*(?:linhas?|chips?|acessos?|números?)/i) || m(/(\d+)\s*(?:fofas?|linhas?)/i);
+    if(linhasMatch) {
+        setIf('totalAcessos', linhasMatch);
+    }
+    
     // Fast chip
     if(/fast\s*chip/i.test(text)) setIf('fastChip', /(\bn[aã]o\b)/i.test(text) ? 'Não' : 'Sim');
     // Nomes/endereços (heurística leve)
@@ -1155,43 +1188,133 @@ const updateFichaFromText = async (jid: string, text: string): Promise<void> => 
     setIf('bairro', m(/bairro\s*[:\-]?\s*(.+)/i));
     setIf('cidade', m(/cidade\s*[:\-]?\s*([\wÀ-ÿ\s]+)/i));
     setIf('estado', m(/estado\s*[:\-]?\s*([A-Za-z]{2})/i));
-    // Totais/Plano
-    setIf('totalAcessos', m(/total\s*de\s*acessos\s*[:\-]?\s*(\d+)/i));
-    setIf('plano', m(/plano\s*[:\-]?\s*([\w\s]+)/i));
-    setIf('nomenclaturaPlano', m(/nomenclatura\s*do\s*plano\s*[:\-]?\s*([\w\s]+)/i));
-
-    // Heurísticas: entender escolhas de planos (fibra/móvel) e valores
+    
+    // MELHORADO: Detecção de planos e valores mais robusta
     const price = m(/(R\$\s?\d{1,3}(?:\.\d{3})*,\d{2})/i);
     const fibraSpeed = m(/\b(\d+\s*(?:giga|mega))\b/i);
     const mobileData = m(/\b(\d+\s*gb)\b/i);
-    if(fibraSpeed) {
-        setIf('plano', `Fibra ${fibraSpeed.toUpperCase ? fibraSpeed.toUpperCase() : fibraSpeed}`);
+    
+    // Detectar planos móveis
+    if(/black\s*empresa/i.test(text) || mobileData) {
+        if(mobileData) setIf('plano', `TIM Black Empresa ${mobileData.toUpperCase ? mobileData.toUpperCase() : mobileData}`);
         if(price) setIf('nomenclaturaPlano', `${price}`);
     }
-    if(/black\s*empresa/i.test(text)) {
-        if(mobileData) setIf('plano', `TIM Black Empresa ${mobileData.toUpperCase ? mobileData.toUpperCase() : mobileData}`);
+    
+    // Detectar planos de fibra
+    if(fibraSpeed || /\bfibra\b/i.test(text)) {
+        if(fibraSpeed) setIf('plano', `Fibra ${fibraSpeed.toUpperCase ? fibraSpeed.toUpperCase() : fibraSpeed}`);
         if(price) setIf('nomenclaturaPlano', `${price}`);
     }
 
     saveFicha(jid, f);
 }
 
+// Analisa o histórico da conversa para extrair informações perdidas
+const analyzeConversationHistory = (jid: string): void => {
+    try {
+        const histFilename = `historical/hist.${jid.replace('@s.whatsapp.net', '@s.whatsapp.net')}.json`;
+        if (!fs.existsSync(histFilename)) return;
+        
+        const history = JSON.parse(fs.readFileSync(histFilename, 'utf8')) as Array<{role: string, text: string}>;
+        const f = loadFicha(jid);
+        let updated = false;
+        
+        // Analisa todas as mensagens do histórico
+        for (const msg of history) {
+            const text = msg.text || '';
+            
+            // Extrai informações que podem ter sido perdidas
+            // Data de vencimento
+            if (!f.vencimento && !f.dataVencimento) {
+                const vencMatch = text.match(/\b(\d{1,2})\b.*vencimento/i) || text.match(/vencimento.*?(\d{1,2})/i);
+                if (vencMatch) {
+                    f.vencimento = vencMatch[1];
+                    f.dataVencimento = vencMatch[1];
+                    updated = true;
+                }
+            }
+            
+            // Número de linhas
+            if (!f.totalAcessos) {
+                const linhasMatch = text.match(/(\d+)\s*(?:linhas?|chips?|acessos?|fofas?)/i);
+                if (linhasMatch) {
+                    f.totalAcessos = linhasMatch[1];
+                    updated = true;
+                }
+            }
+            
+            // Plano e valores
+            if (!f.plano) {
+                if (text.includes('50gb') || text.includes('50 gb')) {
+                    f.plano = 'TIM Black Empresa 50GB';
+                    updated = true;
+                } else if (text.includes('100gb') || text.includes('100 gb')) {
+                    f.plano = 'TIM Black Empresa 100GB';
+                    updated = true;
+                } else if (text.includes('150gb') || text.includes('150 gb')) {
+                    f.plano = 'TIM Black Empresa 150GB';
+                    updated = true;
+                }
+            }
+            
+            // Valor do plano
+            if (!f.nomenclaturaPlano) {
+                const priceMatch = text.match(/(R\$\s?\d{1,3}(?:\.\d{3})*,\d{2})/i);
+                if (priceMatch) {
+                    f.nomenclaturaPlano = priceMatch[1];
+                    updated = true;
+                }
+            }
+            
+            // Portabilidade
+            if (!f.portabilidade) {
+                if (text.includes('portabilidade') || text.includes('portar') || text.includes('trazer número')) {
+                    f.portabilidade = text.includes('não') ? 'Não' : 'Sim';
+                    updated = true;
+                }
+            }
+        }
+        
+        if (updated) {
+            saveFicha(jid, f);
+            console.log('[HISTORY ANALYSIS]', { jid, updated: true });
+        }
+    } catch (error) {
+        console.log('[HISTORY ANALYSIS ERROR]', { jid, error: error?.message });
+    }
+};
+
 // Monta checklist resumido do que ainda falta na ficha
 function buildMissingChecklistText(jid: string): string {
     const f = loadFicha(jid);
     const missing: string[] = [];
+    
+    // Informações básicas obrigatórias
     if(!f.cnpj) missing.push('- CNPJ (14 dígitos)');
     if(!f.razaoSocial) missing.push('- Razão Social');
     if(!f.cep) missing.push('- CEP de instalação');
     if(!f.endereco) missing.push('- Endereço com número e complemento');
     if(!f.email) missing.push('- E-mail de contato/financeiro');
+    
+    // Portabilidade - só pedir se não foi mencionada
     if(!f.portabilidade) missing.push('- Portabilidade (Sim/Não)');
-    if(!f.operadora && f.portabilidade === 'Sim') missing.push('- Operadora atual');
-    if(!f.numeroPortado && f.portabilidade === 'Sim') missing.push('- Número(s) a portar');
+    
+    // Detalhes de portabilidade - só pedir se portabilidade = Sim
+    if(f.portabilidade === 'Sim') {
+        if(!f.operadora) missing.push('- Operadora atual');
+        if(!f.numeroPortado) missing.push('- Número(s) a portar');
+    }
+    
+    // Plano e valores - só pedir se não foi mencionado
     if(!f.plano) missing.push('- Plano escolhido (Fibra/Móvel)');
     if(!f.nomenclaturaPlano) missing.push('- Valor do plano');
+    
+    // Data de vencimento - só pedir se não foi mencionada
     if(!f.vencimento && !f.dataVencimento) missing.push('- Data de vencimento desejada');
+    
+    // Total de acessos - só pedir se não foi mencionado
     if(!f.totalAcessos) missing.push('- Total de acessos (linhas)');
+    
     return missing.join('\n');
 }
 
