@@ -522,10 +522,15 @@ async function handle(msg: WAMessage): Promise<void> {
         try {
             const lower = (finalText || '').toLowerCase();
             if(/enviei|mandei|acabei de enviar|enviado/.test(lower)) {
-                // Analisa o histórico para extrair informações perdidas
+                // Analisa o histórico para extrair informações perdidas ANTES de verificar pendências
                 analyzeConversationHistory(jid);
                 
+                // Aguarda um pouco para garantir que a análise foi processada
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
                 const ficha = loadFicha(jid);
+                console.log('[DOCUMENT CHECK]', { jid, ficha: Object.keys(ficha), missing: buildMissingChecklistText(jid) });
+                
                 const missing = buildMissingChecklistText(jid);
                 
                 // Se não há pendências críticas, confirmar que está tudo ok
@@ -534,21 +539,9 @@ async function handle(msg: WAMessage): Promise<void> {
                     return;
                 }
                 
-                // Se há pendências, mas são apenas documentos, orientar sobre envio
-                const missingArray = missing.split('\n').filter(line => line.trim());
-                const onlyDocuments = missingArray.every(item => 
-                    item.includes('documento') || 
-                    item.includes('contrato') || 
-                    item.includes('foto') ||
-                    item.includes('representante')
-                );
-                
-                if (onlyDocuments) {
-                    await sendMessage(jid, `Entendi que você enviou os documentos. Para finalizarmos, ainda preciso de:\n${missing}\n\nPode me enviar por aqui?`);
-                } else {
-                    await sendMessage(jid, `Entendi que você enviou os documentos. Para finalizarmos, ainda preciso de:\n${missing}\n\nPode me enviar por aqui?`);
-                }
-                return;
+                // Se há pendências, deixar a IA responder naturalmente em vez de usar resposta pronta
+                // Remove o return para que a IA processe com Gemini
+                console.log('[DOCUMENT CHECK]', { jid, message: 'Deixando IA responder naturalmente', missing });
             }
         } catch {}
 
@@ -1213,11 +1206,16 @@ const updateFichaFromText = async (jid: string, text: string): Promise<void> => 
 const analyzeConversationHistory = (jid: string): void => {
     try {
         const histFilename = `historical/hist.${jid.replace('@s.whatsapp.net', '@s.whatsapp.net')}.json`;
-        if (!fs.existsSync(histFilename)) return;
+        if (!fs.existsSync(histFilename)) {
+            console.log('[HISTORY ANALYSIS]', { jid, error: 'Arquivo de histórico não encontrado' });
+            return;
+        }
         
         const history = JSON.parse(fs.readFileSync(histFilename, 'utf8')) as Array<{role: string, text: string}>;
         const f = loadFicha(jid);
         let updated = false;
+        
+        console.log('[HISTORY ANALYSIS]', { jid, historyLength: history.length, currentFicha: Object.keys(f) });
         
         // Analisa todas as mensagens do histórico
         for (const msg of history) {
@@ -1226,11 +1224,12 @@ const analyzeConversationHistory = (jid: string): void => {
             // Extrai informações que podem ter sido perdidas
             // Data de vencimento
             if (!f.vencimento && !f.dataVencimento) {
-                const vencMatch = text.match(/\b(\d{1,2})\b.*vencimento/i) || text.match(/vencimento.*?(\d{1,2})/i);
+                const vencMatch = text.match(/\b(\d{1,2})\b.*vencimento/i) || text.match(/vencimento.*?(\d{1,2})/i) || text.match(/data.*?(\d{1,2})/i);
                 if (vencMatch) {
                     f.vencimento = vencMatch[1];
                     f.dataVencimento = vencMatch[1];
                     updated = true;
+                    console.log('[HISTORY ANALYSIS]', { jid, found: 'vencimento', value: vencMatch[1] });
                 }
             }
             
@@ -1240,6 +1239,7 @@ const analyzeConversationHistory = (jid: string): void => {
                 if (linhasMatch) {
                     f.totalAcessos = linhasMatch[1];
                     updated = true;
+                    console.log('[HISTORY ANALYSIS]', { jid, found: 'totalAcessos', value: linhasMatch[1] });
                 }
             }
             
@@ -1248,12 +1248,15 @@ const analyzeConversationHistory = (jid: string): void => {
                 if (text.includes('50gb') || text.includes('50 gb')) {
                     f.plano = 'TIM Black Empresa 50GB';
                     updated = true;
+                    console.log('[HISTORY ANALYSIS]', { jid, found: 'plano', value: 'TIM Black Empresa 50GB' });
                 } else if (text.includes('100gb') || text.includes('100 gb')) {
                     f.plano = 'TIM Black Empresa 100GB';
                     updated = true;
+                    console.log('[HISTORY ANALYSIS]', { jid, found: 'plano', value: 'TIM Black Empresa 100GB' });
                 } else if (text.includes('150gb') || text.includes('150 gb')) {
                     f.plano = 'TIM Black Empresa 150GB';
                     updated = true;
+                    console.log('[HISTORY ANALYSIS]', { jid, found: 'plano', value: 'TIM Black Empresa 150GB' });
                 }
             }
             
@@ -1263,6 +1266,7 @@ const analyzeConversationHistory = (jid: string): void => {
                 if (priceMatch) {
                     f.nomenclaturaPlano = priceMatch[1];
                     updated = true;
+                    console.log('[HISTORY ANALYSIS]', { jid, found: 'nomenclaturaPlano', value: priceMatch[1] });
                 }
             }
             
@@ -1271,13 +1275,16 @@ const analyzeConversationHistory = (jid: string): void => {
                 if (text.includes('portabilidade') || text.includes('portar') || text.includes('trazer número')) {
                     f.portabilidade = text.includes('não') ? 'Não' : 'Sim';
                     updated = true;
+                    console.log('[HISTORY ANALYSIS]', { jid, found: 'portabilidade', value: f.portabilidade });
                 }
             }
         }
         
         if (updated) {
             saveFicha(jid, f);
-            console.log('[HISTORY ANALYSIS]', { jid, updated: true });
+            console.log('[HISTORY ANALYSIS]', { jid, updated: true, newFicha: Object.keys(f) });
+        } else {
+            console.log('[HISTORY ANALYSIS]', { jid, updated: false, message: 'Nenhuma informação nova encontrada' });
         }
     } catch (error) {
         console.log('[HISTORY ANALYSIS ERROR]', { jid, error: error?.message });
