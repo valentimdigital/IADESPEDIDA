@@ -886,6 +886,12 @@ type FichaEmpresa = {
     telefone2?: string;
     telefone3?: string;
     telefone4?: string;
+    // Campos específicos para fibra
+    orgaoExpedidor?: string; // Órgão expedidor do RG
+    dataExpedicao?: string; // Data de expedição do RG
+    dataNascimento?: string; // Data de nascimento
+    nomeMae?: string; // Nome da mãe
+    numero?: string; // Número do endereço
     endereco?: string;
     complemento?: string;
     cep?: string;
@@ -1181,6 +1187,13 @@ const updateFichaFromText = async (jid: string, text: string): Promise<void> => 
     // Referência
     setIf('referencia', m(/(?:referência|referencia|ponto\s*de\s*referência)\s*[:\-]?\s*([^\n]+)/i));
     
+    // Campos específicos para fibra
+    setIf('orgaoExpedidor', m(/(?:órgão|orgao|expedidor)\s*[:\-]?\s*([A-Za-zÀ-ÿ\s]+)/i));
+    setIf('dataExpedicao', m(/(?:data\s*de\s*expedição|data\s*expedição)\s*[:\-]?\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i));
+    setIf('dataNascimento', m(/(?:nasc|nascimento|data\s*nascimento)\s*[:\-]?\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i));
+    setIf('nomeMae', m(/(?:mãe|mae|nome\s*da\s*mãe)\s*[:\-]?\s*([A-Za-zÀ-ÿ\s]+)/i));
+    setIf('numero', m(/(?:nº|numero|número)\s*[:\-]?\s*(\d{1,5}[A-Za-z]?)/i));
+    
     // MELHORADO: Detecção de data de vencimento mais robusta
     const vencimentoMatch = m(/venc(?:imento)?\s*[:\-]?\s*(\d{1,2})/i) || m(/\b(\d{1,2})\b.*vencimento/i) || m(/data\s*de\s*vencimento\s*[:\-]?\s*(\d{1,2})/i);
     if(vencimentoMatch) {
@@ -1334,10 +1347,55 @@ const analyzeConversationHistory = (jid: string): void => {
     }
 };
 
+// Detecta se é plano de fibra ou móvel
+function isFiberPlan(ficha: FichaEmpresa): boolean {
+    const plano = (ficha.plano || '').toLowerCase();
+    return plano.includes('fibra') || plano.includes('giga') || plano.includes('mega') || 
+           plano.includes('ultra') || plano.includes('internet');
+}
+
 // Gera ficha completa formatada para enviar ao cliente
 function generateCompleteFichaText(jid: string): string {
     const f = loadFicha(jid);
     
+    // Se é plano de fibra, usa ficha simplificada
+    if (isFiberPlan(f)) {
+        return generateFiberFichaText(f);
+    }
+    
+    // Se é plano móvel, usa ficha completa
+    return generateMobileFichaText(f);
+}
+
+// Ficha para Ultra Fibra (simplificada)
+function generateFiberFichaText(f: FichaEmpresa): string {
+    const ficha = `CONSULTOR: Valentina
+
+◼️ Nome: ${f.representanteLegal || '________________'}
+◼️ CPF: ${f.cpf || '________________'}
+◼️ RG: ${f.rg || '________________'}
+◼️ ORGÃO: ${f.orgaoExpedidor || '________________'}
+◼️ DATA DE EXPEDIÇÃO: ${f.dataExpedicao || '________________'}
+◾ NASC: ${f.dataNascimento || '________________'}
+◾ MÃE: ${f.nomeMae || '________________'}
+◼️ Contato: ${f.telefone1 || '________________'}
+⛔ E-mail: ${f.email || '________________'}
+◼️ Rua: ${f.endereco || '________________'}
+◼️ Nº: ${f.numero || '________________'}
+◼️ Complemento: ${f.complemento || '________________'}
+◼️ Bairro: ${f.bairro || '________________'}
+◼️ Cidade: ${f.cidade || '________________'}
+◼️ CEP: ${f.cep || '________________'}
+
+🔴 Ponto referência: ${f.referencia || '________________'}
+🔴 Vencimento: ${f.vencimento || f.dataVencimento || '________________'}
+◼️ Plano: ${f.plano || '________________'}`;
+
+    return ficha;
+}
+
+// Ficha para Linhas Móveis (completa)
+function generateMobileFichaText(f: FichaEmpresa): string {
     const ficha = `Consultor: Valentina 
 DATA: ${new Date().toLocaleDateString('pt-BR')}
 Razão social: ${f.razaoSocial || '________________'}
@@ -1369,6 +1427,40 @@ VENCIMENTO: ${f.vencimento || f.dataVencimento || '________________'}`;
 // Monta checklist resumido do que ainda falta na ficha
 function buildMissingChecklistText(jid: string): string {
     const f = loadFicha(jid);
+    const missing: string[] = [];
+    
+    // Se é plano de fibra, usa checklist simplificado
+    if (isFiberPlan(f)) {
+        return buildFiberMissingChecklist(f);
+    }
+    
+    // Se é plano móvel, usa checklist completo
+    return buildMobileMissingChecklist(f);
+}
+
+// Checklist para planos de fibra (simplificado)
+function buildFiberMissingChecklist(f: FichaEmpresa): string {
+    const missing: string[] = [];
+    
+    // Informações básicas obrigatórias para fibra
+    if(!f.representanteLegal) missing.push('- Nome completo');
+    if(!f.cpf) missing.push('- CPF');
+    if(!f.rg) missing.push('- RG');
+    if(!f.email) missing.push('- E-mail');
+    if(!f.telefone1) missing.push('- Telefone de contato');
+    if(!f.endereco) missing.push('- Endereço completo');
+    if(!f.numero) missing.push('- Número do endereço');
+    if(!f.bairro) missing.push('- Bairro');
+    if(!f.cidade) missing.push('- Cidade');
+    if(!f.cep) missing.push('- CEP');
+    if(!f.vencimento && !f.dataVencimento) missing.push('- Data de vencimento');
+    if(!f.plano) missing.push('- Plano escolhido');
+    
+    return missing.join('\n');
+}
+
+// Checklist para planos móveis (completo)
+function buildMobileMissingChecklist(f: FichaEmpresa): string {
     const missing: string[] = [];
     
     // Informações básicas obrigatórias
