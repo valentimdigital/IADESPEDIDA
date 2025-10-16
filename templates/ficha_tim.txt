@@ -1,0 +1,51 @@
+FICHA TIM
+
+DATA:
+CONSULTOR:
+
+
+DADOS DA EMPRESA:
+Razão Social:
+CNPJ:
+Inscrição Estadual:
+Situação Cadastral:
+
+
+DADOS DO CONTATO
+Representante Legal:
+RG:
+CPF:
+E-mail:
+Telefone 1:
+Telefone 2:
+Endereço:
+Complemento:
+CEP:
+Bairro:
+Ponto de Referência:
+Cidade:
+Estado:
+
+VENCIMENTO:
+
+INFORMAÇÕES DO PLANO
+Portabilidade: (   ) Sim   (   ) Não
+Operadora:
+Número a ser portado:
+
+CASO SEJA TROCA DE TITULARIDADE (TT) / PORTABILIDADE:
+Nome do Cedente:
+CPF do Cedente:
+
+Total de acessos:
+Plano: TIM Black Empresa III
+Nomenclatura do plano:
+Data de vencimento:
+
+FAST CHIP
+Sim (   )
+Não (   )
+
+Observação:
+Se for portabilidade, são necessárias as últimas 3 faturas e os últimos 3 comprovantes de pagamento.
+
