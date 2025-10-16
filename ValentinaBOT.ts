@@ -561,6 +561,29 @@ async function handle(msg: WAMessage): Promise<void> {
             }
         } catch {}
 
+        // Se o cliente pedir para ver a ficha completa
+        try {
+            const lower = (finalText || '').toLowerCase();
+            if(/\bficha\b|\bresumo\b|\bdados\b|\bstatus\b|\bprogresso\b/i.test(lower)) {
+                // Analisa o histórico para extrair informações perdidas
+                analyzeConversationHistory(jid);
+                
+                const fichaCompleta = generateCompleteFichaText(jid);
+                const missing = buildMissingChecklistText(jid);
+                
+                let mensagem = `📋 **FICHA COMPLETA**\n\n${fichaCompleta}`;
+                
+                if (missing) {
+                    mensagem += `\n\n⚠️ **AINDA FALTA:**\n${missing}`;
+                } else {
+                    mensagem += `\n\n✅ **FICHA COMPLETA!** Todos os dados foram coletados.`;
+                }
+                
+                await sendMessage(jid, mensagem);
+                return;
+            }
+        } catch {}
+
         // Atualiza ficha com quaisquer dados reconhecíveis e responde a comandos de ficha
 		await safeAsync(() => updateFichaFromText(jid, finalText));
 		if(isGroup)
@@ -853,6 +876,7 @@ type FichaEmpresa = {
     cnpj?: string;
     inscricaoEstadual?: string;
     situacaoCadastral?: string;
+    cnae?: string; // Código de atividades
     // Contato
     representanteLegal?: string;
     rg?: string;
@@ -860,6 +884,8 @@ type FichaEmpresa = {
     email?: string;
     telefone1?: string;
     telefone2?: string;
+    telefone3?: string;
+    telefone4?: string;
     endereco?: string;
     complemento?: string;
     cep?: string;
@@ -867,6 +893,8 @@ type FichaEmpresa = {
     pontoReferencia?: string;
     cidade?: string;
     estado?: string;
+    enderecoEntrega?: string; // Endereço de entrega específico
+    referencia?: string; // Referência do local
     vencimento?: string; // dia
     // Plano
     portabilidade?: string; // Sim/Não
@@ -1137,6 +1165,21 @@ const updateFichaFromText = async (jid: string, text: string): Promise<void> => 
     const cpfDigits = cpfCap ? cpfCap.replace(/\D+/g,'') : undefined;
     if(cpfDigits && validateCpf(cpfDigits)) setIf('cpf', cpfDigits);
     setIf('telefone1', m(/(?:tel|telefone|contato)\s*[:\-]?\s*(\+?\d{10,15})/i));
+    setIf('telefone2', m(/(?:tel|telefone|contato)\s*2\s*[:\-]?\s*(\+?\d{10,15})/i));
+    setIf('telefone3', m(/(?:tel|telefone|contato)\s*3\s*[:\-]?\s*(\+?\d{10,15})/i));
+    setIf('telefone4', m(/(?:tel|telefone|contato)\s*4\s*[:\-]?\s*(\+?\d{10,15})/i));
+    
+    // RG
+    setIf('rg', m(/\b(?:rg|registro\s*geral)\s*[:\-]?\s*(\d{1,2}\.?\d{3}\.?\d{3}[\s-]?\d{1})/i));
+    
+    // CNAE
+    setIf('cnae', m(/\b(?:cnae|código\s*de\s*atividades?)\s*[:\-]?\s*(\d{4,7})/i));
+    
+    // Endereço de entrega específico
+    setIf('enderecoEntrega', m(/(?:endereço\s*de\s*entrega|entrega)\s*[:\-]?\s*([^\n]+)/i));
+    
+    // Referência
+    setIf('referencia', m(/(?:referência|referencia|ponto\s*de\s*referência)\s*[:\-]?\s*([^\n]+)/i));
     
     // MELHORADO: Detecção de data de vencimento mais robusta
     const vencimentoMatch = m(/venc(?:imento)?\s*[:\-]?\s*(\d{1,2})/i) || m(/\b(\d{1,2})\b.*vencimento/i) || m(/data\s*de\s*vencimento\s*[:\-]?\s*(\d{1,2})/i);
@@ -1290,6 +1333,38 @@ const analyzeConversationHistory = (jid: string): void => {
         console.log('[HISTORY ANALYSIS ERROR]', { jid, error: error?.message });
     }
 };
+
+// Gera ficha completa formatada para enviar ao cliente
+function generateCompleteFichaText(jid: string): string {
+    const f = loadFicha(jid);
+    
+    const ficha = `Consultor: Valentina 
+DATA: ${new Date().toLocaleDateString('pt-BR')}
+Razão social: ${f.razaoSocial || '________________'}
+CNPJ: ${f.cnpj || '________________'}
+CÓDIGO ATIVIDADES: ${f.cnae || '________________'}
+Representante legal: ${f.representanteLegal || '________________'}
+CPF: ${f.cpf || '________________'}
+RG: ${f.rg || '________________'}
+E-mail: ${f.email || '________________'}
+Telefone: ${f.telefone1 || '________________'}
+Telefone: ${f.telefone2 || '________________'}
+Telefone: ${f.telefone3 || '________________'}
+Telefone: ${f.telefone4 || '________________'}
+Logradouro: ${f.endereco || '________________'}
+Complemento: ${f.complemento || '________________'}
+Bairro: ${f.bairro || '________________'}
+Cep: ${f.cep || '________________'}
+Estado: ${f.estado || '________________'}
+Endereço de Entrega: ${f.enderecoEntrega || '________________'}
+Referencia: ${f.referencia || '________________'}
+Acessos: ${f.totalAcessos || '________________'}
+Plano: ${f.plano || '________________'}
+Nomenclatura: ${f.nomenclaturaPlano || '________________'}
+VENCIMENTO: ${f.vencimento || f.dataVencimento || '________________'}`;
+
+    return ficha;
+}
 
 // Monta checklist resumido do que ainda falta na ficha
 function buildMissingChecklistText(jid: string): string {
